@@ -7,7 +7,7 @@ class SpectralEncoder(nn.Module):
         self,
         input_channels: int = 12,
         embedding_dim: int = 1024,
-    ):
+    )-> None:
         super().__init__()
 
         self.encoder = nn.Sequential(

@@ -1,34 +1,71 @@
-from pathlib import Path 
-from uuid import uuid4
+import uuid
+from pathlib import Path
 
-from fastapi import  UploadFile
+from fastapi import UploadFile
+
 from core.config import settings
 
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif","tif","tiff"}
 
-async def save_upload_file(upload_file: UploadFile,)->Path:
-    filename= upload_file.filename or "" 
-    extension = Path(filename).suffix.lower()
+ALLOWED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
 
-    if extension not in ALLOWED_EXTENSIONS:
-        raise ValueError(f"File extension '{extension}' is not allowed.")
-    upload_dir= Path(settings.upload_dir)
+
+def validate_extension(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file type: {suffix}. "
+            f"Allowed: {sorted(ALLOWED_EXTENSIONS)}"
+        )
+
+    return suffix
+
+
+async def save_upload(file: UploadFile) -> Path:
+    if not file.filename:
+        raise ValueError("Uploaded file has no filename.")
+
+    suffix = validate_extension(file.filename)
+
+    upload_dir = settings.upload_path
     upload_dir.mkdir(parents=True, exist_ok=True)
-    output_path= (upload_dir / f"{uuid4().hex}{extension}")
 
-    max_bytes = (settings.max_upload_size_mb * 1024 * 1024)  # Convert MB to bytes
-    total = 0
+    destination = upload_dir / f"{uuid.uuid4().hex}{suffix}"
 
-    with output_path.open("wb") as buffer:
-        while True:
-            chunk = await upload_file.read(1024 * 1024)  # Read in 1 MB chunks
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > max_bytes:
-                output_path.unlink(missing_ok=True)  # Delete the partially written file
+    total_bytes = 0
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
 
-                raise ValueError(f"File size exceeds the maximum limit of {settings.max_upload_size_mb} MB.")
-            buffer.write(chunk)
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
 
-    return output_path
+                if not chunk:
+                    break
+
+                total_bytes += len(chunk)
+
+                if total_bytes > max_bytes:
+                    destination.unlink(missing_ok=True)
+                    raise ValueError(
+                        f"Upload exceeds the "
+                        f"{settings.max_upload_size_mb} MB limit."
+                    )
+
+                output.write(chunk)
+
+    finally:
+        await file.close()
+
+    return destination
+
+
+def delete_file(path: Path) -> None:
+    path.unlink(missing_ok=True)
